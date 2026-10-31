@@ -1,0 +1,112 @@
+version: 2
+
+sources:
+  - name: ref_data_raw
+    description: >
+      Raw holiday + commerce calendar data loaded from Parquet files generated
+      by scripts/generate_holidays.py. Load via bq/setup.sh (BigQuery) or
+      snowflake/setup.sql (Snowflake) before running dbt.
+    schema: "{{ var('ref_data_raw_schema', 'ref_data_raw') }}"
+    tables:
+      - name: holidays
+        description: "Raw holiday rows as generated and loaded from Parquet."
+        columns:
+          - name: calendar_date
+            tests: [not_null]
+          - name: country_code
+            tests: [not_null]
+          - name: holiday_name
+            tests: [not_null]
+          - name: holiday_category
+            tests:
+              - not_null
+              - accepted_values:
+                  values: ["public_holiday", "commercial", "observance"]
+
+# ── Models ────────────────────────────────────────────────────────────────────
+
+models:
+  - name: ref_calendar_dates
+    description: >
+      Full date spine from ref_data_start_date to ref_data_end_date with
+      standard calendar attributes and Australian (July to June) fiscal year labelling.
+      No external data dependencies — pure SQL.
+      Grain: one row per calendar day.
+    columns:
+      - name: calendar_date
+        description: "The date. Primary key."
+        tests: [unique, not_null]
+      - name: fiscal_year_au
+        description: "'FY27', 'FY28', etc. End-year convention, July-June."
+        tests: [not_null]
+      - name: fiscal_quarter_au
+        description: "1=Jul-Sep, 2=Oct-Dec, 3=Jan-Mar, 4=Apr-Jun."
+        tests:
+          - not_null
+          - accepted_values:
+              values: [1, 2, 3, 4]
+      - name: fiscal_month_au
+        description: "1=July, 12=June."
+        tests:
+          - not_null
+          - accepted_values:
+              values: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
+      - name: day_of_week_iso
+        description: "1=Monday, 7=Sunday (ISO 8601)."
+        tests:
+          - accepted_values:
+              values: [1, 2, 3, 4, 5, 6, 7]
+
+  - name: ref_holidays
+    description: >
+      Cleaned, typed holiday rows from the raw source table.
+      Grain: (calendar_date, country_code, holiday_name, holiday_category).
+      A single date can have multiple rows per country.
+    columns:
+      - name: calendar_date
+        tests: [not_null]
+      - name: country_code
+        description: "ISO 3166-1 alpha-2 country code."
+        tests: [not_null]
+      - name: holiday_name
+        tests: [not_null]
+      - name: holiday_category
+        tests:
+          - not_null
+          - accepted_values:
+              values: ["public_holiday", "commercial", "observance"]
+      - name: is_public_holiday
+        tests: [not_null]
+      - name: is_commercial_date
+        tests: [not_null]
+
+  - name: ref_holiday_calendar
+    description: >
+      Primary analyst-facing table. Grain: (calendar_date, country_code).
+      Flattens all holidays for a date into boolean flags and semicolon-
+      separated name strings. Join this to any fact table on calendar_date
+      + country_code to enrich dashboards with holiday context.
+
+      Key use cases:
+        - Exclude public holidays from "business day" calculations
+        - Annotate revenue charts with holiday markers
+        - Filter or group by commercial_season for seasonality analysis
+        - Compute "days to next commercial peak" for planning
+    columns:
+      - name: calendar_date
+        tests: [not_null]
+      - name: country_code
+        tests: [not_null]
+      - name: is_public_holiday
+        description: "True if any public holiday falls on this date in this country."
+        tests: [not_null]
+      - name: is_commercial_date
+        description: "True if any commercial event falls on this date in this country."
+        tests: [not_null]
+      - name: is_notable_date
+        description: "True if public holiday, commercial date, OR weekend."
+        tests: [not_null]
+      - name: fiscal_year_au
+        tests: [not_null]
+      - name: fiscal_quarter_au
+        tests: [not_null]

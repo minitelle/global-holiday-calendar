@@ -1,0 +1,40 @@
+name: 'global_holiday_calendar'
+version: '1.0.0'
+config-version: 2
+
+# Installable as a private dbt package:
+#   packages:
+#     - git: "https://github.com/minitelle/global-holiday-calendar.git"
+#       subdirectory: "dbt"
+#       revision: "main"
+
+profile: 'global_holiday_calendar'
+
+model-paths:  ["models"]
+seed-paths:   ["seeds"]
+macro-paths:  ["macros"]
+test-paths:   ["tests"]
+
+target-path: "target"
+clean-targets: ["target", "dbt_packages"]
+
+models:
+  global_holiday_calendar:
+    +materialized: table
+    +tags: ["reference", "ref_data"]
+    # All reference models are idempotent full replaces — no incremental needed.
+    # In BigQuery: no partition filter required (tables are small, ~100k rows max).
+    # In Snowflake: standard clustering on calendar_date is applied per-model.
+
+seeds:
+  global_holiday_calendar:
+    +schema: ref_data
+
+vars:
+  # Override the date range if needed for your project.
+  ref_data_start_date: '2019-01-01'
+  ref_data_end_date:   '2032-01-01'
+
+  # Name of the BigQuery dataset or Snowflake schema where the raw holidays
+  # Parquet data has been loaded (via scripts/generate_holidays.py + bq/ or snowflake/ setup).
+  ref_data_raw_schema: 'ref_data_raw'
